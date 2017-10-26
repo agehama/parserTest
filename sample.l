@@ -12,7 +12,8 @@ typedef yy::parser::token P_Token;
 
 whitespace [ \t\r]
 number	0|[1-9][0-9]*
-symbol [+\-*/\^=><(){}\[\]:\\]
+symbol [+\-*/\^=><(){}\[\]:\\,]
+identifer [a-zA-Z_][a-zA-Z0-9_]*
 other .
 
 %%
@@ -22,22 +23,29 @@ other .
 %}
 {whitespace}+ {}
 {number} {
-	yylval->build<ExprHolder>(Expr(std::stoi(yytext)));
+	yylval->build<Expr>(Expr(std::stoi(yytext)));
 	return P_Token::VALUE;
 }
 {number}\.[0-9]* {
-	yylval->build<ExprHolder>(Expr(std::stod(yytext)));
+	yylval->build<Expr>(Expr(std::stod(yytext)));
 	return P_Token::VALUE;
 }
+{identifer} {
+	const auto ii = Identifer(yytext);
+	printExpr(ii);
+	yylval->build<Identifer>(ii);
+	return P_Token::NAME;
+}
+"->" {
+	return P_Token::arrow;
+}
 {symbol} {
-	//std::cout << "Symbol(" << yytext << ")" << std::endl;
 	return yytext[0];
 }
 "\n" {
 	yylloc->lines(1);
 	return P_Token::LF;
 }
-"\0" { return P_Token::END; }
 {other} { std::cout << "Error(" << yytext << ")" << std::endl; }
 
 %%
