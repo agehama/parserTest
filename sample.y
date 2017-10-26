@@ -2,13 +2,15 @@
 
 %code requires {	
 	#include "Node.hpp"
-	#include "location.hh"
 
 	namespace yy {
         class testLexer;
     };
 
-	void parse(const std::vector<std::string>&, Statement* statement);
+	void parse(const std::vector<std::string>&, Lines* program);
+
+	//#define PRINT_EXPR(expr) 
+	#define PRINT_EXPR(expr) printExpr(expr)
 }
 
 %code {
@@ -19,47 +21,66 @@
 }
 
 %skeleton "lalr1.cc"
-%parse-param {testLexer* scanner} {Statement* statements}
+%parse-param {testLexer* scanner} {Lines* program}
 %locations
 %define parse.error verbose
 %define parse.assert
 %define api.value.type variant
 
-%token <ExprHolder> VALUE
-%token LF END
-%type <ExprHolder> factor
-%type <ExprHolder> expr term
+%token <Identifer> NAME
+%token <Expr> VALUE
+%token LF arrow
+%type <Expr> factor
+%type <Expr> expr term def_func
+%type <Lines> lines expr_seq
+%type <Arguments> arguments
 %left '+' '-' '*' '/' '=' '>' '<'
 %right '^'
 
 %%
 
-input : %empty
-      | input line
-	  ;
-
-line  : END
-      | LF
-      | expr LF { std::cout << "Expr\n"; statements->add($1.expr); }
+prog  : %empty
+	  | lines    { *program = $1; }
       | error LF { yyerrok; yyclearin; }
 	  ;
 
-expr  : term
-      | expr '+' expr { std::cout << "Add\n"; $$ = ExprHolder(BinaryExpr<Add>($1.expr, $3.expr)); }
-      | expr '-' expr { std::cout << "Sub\n"; $$ = ExprHolder(BinaryExpr<Sub>($1.expr, $3.expr)); }
-	  | expr '=' expr { std::cout << "Assign\n"; $$ = ExprHolder(BinaryExpr<Assign>($1.expr, $3.expr)); }
+def_func : '(' ')' arrow '(' ')'                 { $$ = DefFunc(); }
+         | '(' ')' arrow '(' lines ')'           { $$ = DefFunc($5); }
+         | '(' arguments ')' arrow '(' lines ')' { $$ = DefFunc($2, $6); }
+		 ;
+
+arguments : NAME               { printExpr($1); $$ = $1; }
+          | NAME ',' arguments { printExpr($1); $$ = $1; $$.concat($3); }
+		  ;
+
+lines : LF             {}
+      | expr_seq       { $$.concat($1); }
+	  | expr_seq LF    { $$.concat($1); }
 	  ;
 
-term  : factor
-      | term '*' term { std::cout << "Mul("; printExpr($1.expr); std::cout <<", "; printExpr($3.expr); std::cout <<")\n"; $$ = ExprHolder(BinaryExpr<Mul>($1.expr, $3.expr)); }
-      | term '/' term { std::cout << "Div\n"; $$ = ExprHolder(BinaryExpr<Div>($1.expr, $3.expr)); }
-      | term '^' term { std::cout << "Pow\n"; $$ = ExprHolder(BinaryExpr<Pow>($1.expr, $3.expr)); }
+expr_seq : expr              { $$ = $1; }
+	     | expr ',' expr_seq { $$ = $1; $$.concat($3); }
+		 | expr LF expr_seq  { $$ = $1; $$.concat($3); }
+	     ;
+
+expr  : term          { $$ = $1;  /*PRINT_EXPR($$);*/ }
+      | expr '+' expr { /*std::cout << "Add\n";*/ $$ = BinaryExpr<Add>($1, $3); }
+      | expr '-' expr { /*std::cout << "Sub\n";*/ $$ = BinaryExpr<Sub>($1, $3); }
+	  | expr '=' expr { /*std::cout << "Assign\n";*/ $$ = BinaryExpr<Assign>($1, $3); }
 	  ;
 
-factor: VALUE         { $$ = $1;  printExpr($$.expr); }
-      | '(' expr ')'  { std::cout << "(Expr)\n"; $$ = $2; std::cout << "()2\n"; }
-	  | '+' factor    { std::cout << "Plus\n"; $$ = ExprHolder(UnaryExpr<Add>($2.expr)); }
-      | '-' factor    { std::cout << "Minus\n"; $$ = ExprHolder(UnaryExpr<Sub>($2.expr)); }
+term  : factor        { $$ = $1;  /*PRINT_EXPR($$);*/ }
+      | term '*' term { /*std::cout << "Mul("; printExpr($1); std::cout <<", "; printExpr($3); std::cout <<")\n";*/ $$ = BinaryExpr<Mul>($1, $3); }
+      | term '/' term { /*std::cout << "Div\n";*/ $$ = BinaryExpr<Div>($1, $3); }
+      | term '^' term { /*std::cout << "Pow\n";*/ $$ = BinaryExpr<Pow>($1, $3); }
+	  ;
+
+factor: VALUE         { $$ = $1;  /*PRINT_EXPR($$);*/ }
+      | '(' expr ')'  { /*std::cout << "(Expr)\n";*/ $$ = $2; }
+	  | '(' lines ')' {  $$ = $2; }
+	  | '+' factor    { /*std::cout << "Plus\n";*/ $$ = UnaryExpr<Add>($2); }
+      | '-' factor    { /*std::cout << "Minus\n";*/ $$ = UnaryExpr<Sub>($2); }
+	  | def_func      { $$ = $1; }
 	  ;
 
 %%
@@ -75,51 +96,134 @@ void yy::parser::error(const parser::location_type& l, const std::string& m)
     throw yy::parser::syntax_error(l, m);
 }
 
-void parse(const std::vector<std::string>& exprs, Statement* out)
+bool parse(const std::string& program, Lines* out)
 {
-	for (int row = 0; row < exprs.size(); ++row) {
-		const std::string& line = exprs[row];
-		std::istringstream in(line);
-		yy::testLexer scanner(&in);
-		yy::parser parser(&scanner, out);
-		try {
-			int result = parser.parse();
-			if (result != 0) {
-				throw std::runtime_error("Unknown parsing error");
-			}
-		}
-		catch (yy::parser::syntax_error& e) {
-			int col = e.location.begin.column;
-			int len = 1 + e.location.end.column - col;
-
-			std::cerr << e.what() << "\n"
-				<< "in row " << row << " col " << col << ":\n\n"
-				<< "    " << line << "\n"
-				<< "    " << std::string(col - 1, ' ') << std::string(len, '^') << std::endl;
-				//throw yy::parser::syntax_error(e.location, msg.str());
-				throw e;
+	std::istringstream in(program);
+	yy::testLexer scanner(&in);
+	yy::parser parser(&scanner, out);
+	try {
+		int result = parser.parse();
+		if (result != 0) {
+			throw std::runtime_error("Unknown parsing error");
 		}
 	}
+	catch (yy::parser::syntax_error& e) {
+		int col = e.location.begin.column;
+		int len = 1 + e.location.end.column - col;
+
+		std::cerr << e.what() << "\n"
+			<< "in " << program << "\n"
+			<< "    " << std::string(col - 1, ' ') << std::string(len, '^') << std::endl;
+			
+			return false;
+	}
+
+	return true;
 }
 
 int main()
 {
-	std::string str;
-	//std::cin >> str;
-	str = "(1*2+3*(4+5/6))";
+	std::vector<std::string> test_ok({
+		"(1*2 + 3*(4 + 5/6))",
+		"1 + 2, 3 + 4",
+		"\n 4*5",
+		"1 + 1 \n 2 + 3",
+		"1 + 2 \n 3 + 4 \n",
+		"1 + 1, \n 2 + 3",
+		"1 + 1 \n \n \n 2 + 3",
+		"1 + 2 \n , 4*5",
+		"()->()",
+		"()->(1 + 2)",
+		"()->(1 + 2 \n 3)",
+		"(x, y)->(x + y)"
+	});
 
-	str.push_back('\n');
+	std::vector<std::string> test_ng({
+		", 3*4",
+		"1 + 1 , , 2 + 3",
+		"1 + 2, 3 + 4,",
+		"1 + 2, \n , 3 + 4",
+		"1 + 3 * , 4 + 5",
+		"1 + 3 * \n 4 + 5"
+	});
 
-	std::vector<std::string> lines;
+	int ok_wrongs = 0;
+	int ng_wrongs = 0;
 
-	lines.push_back(str);
-	Statement* pStatement = new Statement;
+	std::cout << "==================== Test Case OK ====================" << std::endl;
+	for(size_t i = 0; i < test_ok.size(); ++i)
+	{
+		std::cout << "Case[" << i << "]\n\n";
 
-	std::cout << "=====================================" << std::endl;
-	parse(lines, pStatement);
-	std::cout << "-------------------------------------" << std::endl;
+		std::cout << "input:\n";
+		std::cout << test_ok[i] << "\n\n";
 
-	printStatement(*pStatement);
+		std::cout << "preprocess:\n";
+		std::cout << preprocess(test_ok[i]) << "\n\n";
 
-	delete pStatement;
+		std::cout << "parse:\n";
+		
+		Lines expr;
+		const bool succeed = parse(preprocess(test_ok[i]), &expr);
+		
+		printExpr(expr);
+
+		std::cout << "\n";
+
+		if(succeed)
+		{
+		    /*
+			std::cout << "eval:\n";
+			printEvaluated(evalExpr(expr));
+			std::cout << "\n";
+			*/
+		}
+		else
+		{
+			std::cout << "[Wrong]\n";
+			++ok_wrongs;
+		}
+
+		std::cout << "-------------------------------------" << std::endl;
+	}
+
+	std::cout << "==================== Test Case NG ====================" << std::endl;
+	for(size_t i = 0; i < test_ng.size(); ++i)
+	{
+		std::cout << "Case[" << i << "]\n\n";
+
+		std::cout << "input:\n";
+		std::cout << test_ng[i] << "\n\n";
+
+		std::cout << "preprocess:\n";
+		std::cout << preprocess(test_ng[i]) << "\n\n";
+
+		std::cout << "parse:\n";
+
+		Lines expr;
+		const bool failed = !parse(preprocess(test_ng[i]), &expr);
+		
+		printExpr(expr);
+
+		std::cout << "\n";
+
+		if(failed)
+		{
+			std::cout << "no result\n";
+		}
+		else
+		{
+			std::cout << "eval:\n";
+			printEvaluated(evalExpr(expr));
+			std::cout << "\n";
+			std::cout << "[Wrong]\n";
+			++ng_wrongs;
+		}
+
+		std::cout << "-------------------------------------" << std::endl;
+	}
+
+	std::cout << "Result:\n";
+	std::cout << "Correct programs: (Wrong / All) = (" << ok_wrongs << " / " << test_ok.size() << ")\n";
+	std::cout << "Wrong   programs: (Wrong / All) = (" << ng_wrongs << " / " << test_ng.size() << ")\n";
 }
