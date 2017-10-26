@@ -26,6 +26,8 @@ struct Identifer
 {
 	std::string name;
 
+	Identifer() = default;
+
 	Identifer(const std::string& name_) :
 		name(name_)
 	{}
@@ -42,12 +44,14 @@ template <class Op>
 struct BinaryExpr;
 
 struct Statement;
+struct Lines;
 
 using Expr = boost::variant<
 	int,
 	double,
 	Identifer,
 	boost::recursive_wrapper<Statement>,
+	boost::recursive_wrapper<Lines>,
 	boost::recursive_wrapper<DefFunc>,
 	boost::recursive_wrapper<CallFunc>,
 	boost::recursive_wrapper<UnaryExpr<Add>>,
@@ -121,16 +125,8 @@ struct BinaryExpr
 
 	BinaryExpr(const Expr& lhs_, const Expr& rhs_) :
 		lhs(lhs_), rhs(rhs_)
-	{
-		/*std::cout << "BinaryExpr(\n";
-		printExpr(lhs);
-		std::cout << ",\n";
-		printExpr(rhs);
-		std::cout << ")\n";*/
-	}
+	{}
 };
-
-
 
 struct Statement
 {
@@ -152,33 +148,99 @@ struct Statement
 	}
 };
 
+struct Lines
+{
+	std::vector<Expr> exprs;
+
+	Lines() = default;
+
+	Lines(const Expr& expr) :
+		exprs({ expr })
+	{}
+
+	Lines(const std::vector<Expr>& exprs_) :
+		exprs(exprs_)
+	{}
+
+	void add(const Expr& expr)
+	{
+		exprs.push_back(expr);
+	}
+
+	void concat(const Lines& lines)
+	{
+		exprs.insert(exprs.end(), lines.exprs.begin(), lines.exprs.end());
+	}
+
+	Lines& operator+=(const Lines& lines)
+	{
+		exprs.insert(exprs.end(), lines.exprs.begin(), lines.exprs.end());
+		return *this;
+	}
+};
+
+struct Arguments
+{
+	std::vector<Identifer> arguments;
+
+	Arguments() = default;
+
+	Arguments(const Identifer& identifer):
+		arguments({ identifer })
+	{}
+
+	void concat(const Arguments& other)
+	{
+		arguments.insert(arguments.end(), other.arguments.begin(), other.arguments.end());
+	}
+
+	Arguments& operator+=(const Arguments& other)
+	{
+		arguments.insert(arguments.end(), other.arguments.begin(), other.arguments.end());
+		return *this;
+	}
+};
+
 struct FuncVal
 {
 	std::map<std::string, Evaluated> environment;
-	std::vector<Identifer> argments;
+	std::vector<Identifer> arguments;
 	Expr expr;
 
 	FuncVal() = default;
 
 	FuncVal(
 		const std::map<std::string, Evaluated>& environment_,
-		const std::vector<Identifer>& argments_,
+		const std::vector<Identifer>& arguments_,
 		const Expr& expr_) :
 		environment(environment_),
-		argments(argments_),
+		arguments(arguments_),
 		expr(expr_)
 	{}
 };
 
 struct DefFunc
 {
-	std::vector<Identifer> argments;
+	std::vector<Identifer> arguments;
 	Expr expr;
 
+	DefFunc() = default;
+
+	DefFunc(const Expr& expr_) :
+		expr(expr_)
+	{}
+
 	DefFunc(
-		const std::vector<Identifer>& argments_,
+		const std::vector<Identifer>& arguments_,
 		const Expr& expr_) :
-		argments(argments_),
+		arguments(arguments_),
+		expr(expr_)
+	{}
+
+	DefFunc(
+		const Arguments& arguments_,
+		const Expr& expr_) :
+		arguments(arguments_.arguments),
 		expr(expr_)
 	{}
 };
@@ -267,72 +329,85 @@ inline EvalOpt Ref(const Evaluated& lhs)
 	return EvalOpt::Double(0);
 }
 
+//#define DEBUG_PRINT_EXPR
+
 class Eval : public boost::static_visitor<Evaluated>
 {
 public:
 
 	Evaluated operator()(int node)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin-End int expression(" << ")" << std::endl;
+#endif
 
 		return node;
 	}
 
 	Evaluated operator()(double node)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin-End double expression(" << ")" << std::endl;
+#endif
 
 		return node;
 	}
 
 	Evaluated operator()(const Identifer& node)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin-End Identifer expression(" << ")" << std::endl;
+#endif
 
 		return node;
 	}
-
-	/*Evaluated operator()(const IntHolder& node)const
-	{
-		std::cout << "Begin-End IntHolder expression(" << ")" << std::endl;
-
-		return node.n;
-	}*/
-
+	
 	Evaluated operator()(const UnaryExpr<Add>& node)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin UnaryExpr<Add> expression(" << ")" << std::endl;
-
+#endif
+		
 		const Evaluated lhs = boost::apply_visitor(*this, node.lhs);
 
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "End UnaryExpr<Add> expression(" << ")" << std::endl;
+#endif
 
 		return lhs;
 	}
 
 	Evaluated  operator()(const UnaryExpr<Sub>& node)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin UnaryExpr<Sub> expression(" << ")" << std::endl;
-
+#endif
+		
 		const Evaluated lhs = boost::apply_visitor(*this, node.lhs);
 
 		const auto ref = Ref(lhs);
 		if (ref.m_witch == 0)
 		{
+#ifdef DEBUG_PRINT_EXPR
 			std::cout << "End UnaryExpr<Sub> expression(" << ")" << std::endl;
-
+#endif
+			
 			return -ref.m_0;
 		}
 
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "End UnaryExpr<Sub> expression(" << ")" << std::endl;
-
+#endif
+		
 		return -ref.m_1;
 	}
 
 	Evaluated  operator()(const BinaryExpr<Add>& node)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin BinaryExpr<Add> expression(" << ")" << std::endl;
-
+#endif
+		
 		const Evaluated lhs = boost::apply_visitor(*this, node.lhs);
 		const Evaluated rhs = boost::apply_visitor(*this, node.rhs);
 		//return lhs + rhs;
@@ -341,22 +416,28 @@ public:
 		const auto vr = Ref(rhs);
 		if (vl.m_witch == 0 && vr.m_witch == 0)
 		{
+#ifdef DEBUG_PRINT_EXPR
 			std::cout << "End BinaryExpr<Add> expression(" << ")" << std::endl;
+#endif
 			return vl.m_0 + vr.m_0;
 		}
 
 		const double dl = vl.m_witch == 0 ? vl.m_0 : vl.m_1;
 		const double dr = vr.m_witch == 0 ? vr.m_0 : vr.m_1;
 
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "End BinaryExpr<Add> expression(" << ")" << std::endl;
-
+#endif
+		
 		return dl + dr;
 	}
 
 	Evaluated operator()(const BinaryExpr<Sub>& node)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin BinaryExpr<Sub> expression(" << ")" << std::endl;
-
+#endif
+		
 		const Evaluated lhs = boost::apply_visitor(*this, node.lhs);
 		const Evaluated rhs = boost::apply_visitor(*this, node.rhs);
 
@@ -364,22 +445,28 @@ public:
 		const auto vr = Ref(rhs);
 		if (vl.m_witch == 0 && vr.m_witch == 0)
 		{
+#ifdef DEBUG_PRINT_EXPR
 			std::cout << "End BinaryExpr<Sub> expression(" << ")" << std::endl;
+#endif
 			return vl.m_0 - vr.m_0;
 		}
 
 		const double dl = vl.m_witch == 0 ? vl.m_0 : vl.m_1;
 		const double dr = vr.m_witch == 0 ? vr.m_0 : vr.m_1;
 
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "End BinaryExpr<Sub> expression(" << ")" << std::endl;
-
+#endif
+		
 		return dl - dr;
 	}
 
 	Evaluated operator()(const BinaryExpr<Mul>& node)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin BinaryExpr<Mul> expression(" << ")" << std::endl;
-
+#endif
+		
 		const Evaluated lhs = boost::apply_visitor(*this, node.lhs);
 		const Evaluated rhs = boost::apply_visitor(*this, node.rhs);
 
@@ -387,22 +474,28 @@ public:
 		const auto vr = Ref(rhs);
 		if (vl.m_witch == 0 && vr.m_witch == 0)
 		{
+#ifdef DEBUG_PRINT_EXPR
 			std::cout << "End BinaryExpr<Mul> expression(" << ")" << std::endl;
+#endif
 			return vl.m_0 * vr.m_0;
 		}
 
 		const double dl = vl.m_witch == 0 ? vl.m_0 : vl.m_1;
 		const double dr = vr.m_witch == 0 ? vr.m_0 : vr.m_1;
 
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "End BinaryExpr<Mul> expression(" << ")" << std::endl;
-
+#endif
+		
 		return dl * dr;
 	}
 
 	Evaluated operator()(const BinaryExpr<Div>& node)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin BinaryExpr<Div> expression(" << ")" << std::endl;
-
+#endif
+		
 		const Evaluated lhs = boost::apply_visitor(*this, node.lhs);
 		const Evaluated rhs = boost::apply_visitor(*this, node.rhs);
 
@@ -410,22 +503,28 @@ public:
 		const auto vr = Ref(rhs);
 		if (vl.m_witch == 0 && vr.m_witch == 0)
 		{
+#ifdef DEBUG_PRINT_EXPR
 			std::cout << "End BinaryExpr<Div> expression(" << ")" << std::endl;
+#endif
 			return vl.m_0 / vr.m_0;
 		}
 
 		const double dl = vl.m_witch == 0 ? vl.m_0 : vl.m_1;
 		const double dr = vr.m_witch == 0 ? vr.m_0 : vr.m_1;
 
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "End BinaryExpr<Div> expression(" << ")" << std::endl;
-
+#endif
+		
 		return dl / dr;
 	}
 
 	Evaluated operator()(const BinaryExpr<Pow>& node)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin BinaryExpr<Pow> expression(" << ")" << std::endl;
-
+#endif
+		
 		const Evaluated lhs = boost::apply_visitor(*this, node.lhs);
 		const Evaluated rhs = boost::apply_visitor(*this, node.rhs);
 
@@ -433,21 +532,27 @@ public:
 		const auto vr = Ref(rhs);
 		if (vl.m_witch == 0 && vr.m_witch == 0)
 		{
+#ifdef DEBUG_PRINT_EXPR
 			std::cout << "End BinaryExpr<Pow> expression(" << ")" << std::endl;
+#endif	
 			return vl.m_0 / vr.m_0;
 		}
 
 		const double dl = vl.m_witch == 0 ? vl.m_0 : vl.m_1;
 		const double dr = vr.m_witch == 0 ? vr.m_0 : vr.m_1;
 
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "End BinaryExpr<Pow> expression(" << ")" << std::endl;
+#endif
 
 		return pow(dl, dr);
 	}
 
 	Evaluated operator()(const BinaryExpr<Assign>& node)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin Assign expression(" << ")" << std::endl;
+#endif
 
 		const Evaluated lhs = boost::apply_visitor(*this, node.lhs);
 		const Evaluated rhs = boost::apply_visitor(*this, node.rhs);
@@ -458,8 +563,10 @@ public:
 		if (!SameType(lhs.type(), typeid(Identifer)))
 		{
 			std::cerr << "Error(" << __LINE__ << ")\n";
+#ifdef DEBUG_PRINT_EXPR
 			std::cout << "End Assign expression(" << ")" << std::endl;
-
+#endif
+			
 			return 0.0;
 		}
 
@@ -467,7 +574,9 @@ public:
 		const auto it = globalVariables.find(name);
 		if (it == globalVariables.end())
 		{
+#ifdef DEBUG_PRINT_EXPR
 			std::cout << "New Variable(" << name << ")\n";
+#endif	
 		}
 		//std::cout << "Variable(" << name << ") -> " << dr << "\n";
 		//variables[name] = dr;
@@ -475,25 +584,32 @@ public:
 
 		//return dr;
 
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "End Assign expression(" << ")" << std::endl;
-
+#endif
 		return rhs;
 	}
 
 	Evaluated operator()(const DefFunc& defFunc)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin DefFunc expression(" << ")" << std::endl;
+#endif
 
-		auto val = FuncVal(globalVariables, defFunc.argments, defFunc.expr);
+		auto val = FuncVal(globalVariables, defFunc.arguments, defFunc.expr);
 
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "End DefFunc expression(" << ")" << std::endl;
+#endif
 
 		return val;
 	}
 
 	Evaluated operator()(const CallFunc& callFunc)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin CallFunc expression(" << ")" << std::endl;
+#endif
 
 		const auto buckUp = localVariables;
 
@@ -518,56 +634,90 @@ public:
 		}
 
 		//const auto& funcVal = callFunc.funcVal;
-		assert(funcVal.argments.size() == callFunc.actualArguments.size());
+		assert(funcVal.arguments.size() == callFunc.actualArguments.size());
 
 		/*
-		ˆø”‚É—^‚¦‚ç‚ê‚½Ž®‚Ì•]‰¿
-		‚±‚ÌŽž“_‚Å‚Í‚Ü‚¾ŠÖ”‚ÌŠO‚È‚Ì‚ÅAƒ[ƒJƒ‹•Ï”‚Í•Ï‚í‚ç‚È‚¢B
+		å¼•æ•°ã«ä¸Žãˆã‚‰ã‚ŒãŸå¼ã®è©•ä¾¡
+		ã“ã®æ™‚ç‚¹ã§ã¯ã¾ã é–¢æ•°ã®å¤–ãªã®ã§ã€ãƒ­ãƒ¼ã‚«ãƒ«å¤‰æ•°ã¯å¤‰ã‚ã‚‰ãªã„ã€‚
 		*/
-		std::vector<Evaluated> argmentValues(funcVal.argments.size());
+		std::vector<Evaluated> argumentValues(funcVal.arguments.size());
 
-		for (size_t i = 0; i < funcVal.argments.size(); ++i)
+		for (size_t i = 0; i < funcVal.arguments.size(); ++i)
 		{
-			argmentValues[i] = boost::apply_visitor(*this, callFunc.actualArguments[i]);
+			argumentValues[i] = boost::apply_visitor(*this, callFunc.actualArguments[i]);
 		}
 
 		/*
-		ŠÖ”‚Ì•]‰¿
-		‚±‚±‚Å‚Ìƒ[ƒJƒ‹•Ï”‚ÍŠÖ”‚ðŒÄ‚Ño‚µ‚½‘¤‚Å‚Í‚È‚­AŠÖ”‚ª’è‹`‚³‚ê‚½‘¤‚Ì‚à‚Ì‚ðŽg‚¤‚Ì‚Åƒ[ƒJƒ‹•Ï”‚ð’u‚«Š·‚¦‚éB
+		é–¢æ•°ã®è©•ä¾¡
+		ã“ã“ã§ã®ãƒ­ãƒ¼ã‚«ãƒ«å¤‰æ•°ã¯é–¢æ•°ã‚’å‘¼ã³å‡ºã—ãŸå´ã§ã¯ãªãã€é–¢æ•°ãŒå®šç¾©ã•ã‚ŒãŸå´ã®ã‚‚ã®ã‚’ä½¿ã†ã®ã§ãƒ­ãƒ¼ã‚«ãƒ«å¤‰æ•°ã‚’ç½®ãæ›ãˆã‚‹ã€‚
 		*/
 		localVariables = funcVal.environment;
 
-		for (size_t i = 0; i < funcVal.argments.size(); ++i)
+		for (size_t i = 0; i < funcVal.arguments.size(); ++i)
 		{
-			localVariables[funcVal.argments[i].name] = argmentValues[i];
+			localVariables[funcVal.arguments[i].name] = argumentValues[i];
 		}
 
 		Evaluated result = boost::apply_visitor(*this, funcVal.expr);
 
 		/*
-		ÅŒã‚Éƒ[ƒJƒ‹•Ï”‚ÌŠÂ‹«‚ðŠÖ”‚ÌŽÀs‘O‚Ì‚à‚Ì‚É–ß‚·B
+		æœ€å¾Œã«ãƒ­ãƒ¼ã‚«ãƒ«å¤‰æ•°ã®ç’°å¢ƒã‚’é–¢æ•°ã®å®Ÿè¡Œå‰ã®ã‚‚ã®ã«æˆ»ã™ã€‚
 		*/
 		localVariables = buckUp;
 
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "End CallFunc expression(" << ")" << std::endl;
+#endif
 
 		return result;
 	}
 
 	Evaluated operator()(const Statement& statement)const
 	{
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "Begin Statement expression(" << ")" << std::endl;
+#endif
+		
+		Evaluated result;
+		int i = 0;
+		for (const auto& expr : statement.exprs)
+		{
+#ifdef DEBUG_PRINT_EXPR
+			std::cout << "Evaluate expression(" << i << ")" << std::endl;
+#endif	
+			result = boost::apply_visitor(*this, expr);
+			++i;
+		}
+
+#ifdef DEBUG_PRINT_EXPR
+		std::cout << "End Statement expression(" << ")" << std::endl;
+#endif
+
+		return result;
+	}
+
+	Evaluated operator()(const Lines& statement)const
+	{
+#ifdef DEBUG_PRINT_EXPR
+		std::cout << "Begin Statement expression(" << ")" << std::endl;
+#endif
+		
 
 		Evaluated result;
 		int i = 0;
 		for (const auto& expr : statement.exprs)
 		{
+#ifdef DEBUG_PRINT_EXPR
 			std::cout << "Evaluate expression(" << i << ")" << std::endl;
+#endif
+			
 			result = boost::apply_visitor(*this, expr);
 			++i;
 		}
 
+#ifdef DEBUG_PRINT_EXPR
 		std::cout << "End Statement expression(" << ")" << std::endl;
+#endif
 
 		return result;
 	}
@@ -591,11 +741,6 @@ public:
 	{
 		std::cout << "Identifer(" << node.name << ")";
 	}
-
-	/*auto operator()(const IntHolder& node)const -> void
-	{
-		std::cout << "IntHolder(" << node.n << ")";
-	}*/
 
 	auto operator()(const UnaryExpr<Add>& node)const -> void
 	{
@@ -695,7 +840,26 @@ public:
 
 	auto operator()(const DefFunc& defFunc)const -> void
 	{
-		std::cout << "DefFunc()\n";
+		std::cout << "DefFunc(";
+		
+		std::cout << "Arguments(";
+
+		for (size_t i = 0; i < defFunc.arguments.size(); ++i)
+		{
+			std::cout << defFunc.arguments[i].name;
+			if (i + 1 != defFunc.arguments.size())
+			{
+				std::cout << ", ";
+			}
+		}
+
+		std::cout << "), ";
+
+		std::cout << "Definition(";
+		boost::apply_visitor(*this, defFunc.expr);
+		std::cout << ")";
+
+		std::cout << ")";
 	}
 
 	auto operator()(const CallFunc& callFunc)const -> void
@@ -717,28 +881,55 @@ public:
 
 		std::cout << "Statement end" << std::endl;
 	}
-};
 
-inline void printStatement(const Statement& statement)
-{
-	//boost::apply_visitor(Printer(), statement);
-
-	std::cout << "Statement begin" << std::endl;
-
-	int i = 0;
-	for (const auto& expr : statement.exprs)
+	void operator()(const Lines& statement)const
 	{
-		std::cout << "Expr(" << i << "): " << std::endl;
-		boost::apply_visitor(Printer(), expr);
-		++i;
-	}
+		std::cout << "Sequence(" << std::endl;
 
-	std::cout << "Statement end" << std::endl;
-}
+		const auto& exprs = statement.exprs;
+
+		for (size_t i = 0; i < exprs.size(); ++i)
+		{
+			boost::apply_visitor(*this, exprs[i]);
+
+			if (i + 1 != exprs.size())
+			{
+				std::cout << ", ";
+			}
+
+			std::cout << "\n";
+		}
+
+		std::cout << ")" << std::endl;
+	}
+};
 
 inline void printExpr(const Expr& expr)
 {
-	std::cout << "PrintExpr(\n";
 	boost::apply_visitor(Printer(), expr);
-	std::cout << "\n) " << std::endl;
+}
+
+inline Evaluated evalExpr(const Expr& expr)
+{
+	return boost::apply_visitor(Eval(), expr);
+}
+
+inline void printEvaluated(const Evaluated& evaluated)
+{
+	if (SameType(evaluated.type(), typeid(int)))
+	{
+		std::cout << boost::get<int>(evaluated);
+	}
+	else if (SameType(evaluated.type(), typeid(double)))
+	{
+		std::cout << boost::get<double>(evaluated);
+	}
+	else if (SameType(evaluated.type(), typeid(Identifer)))
+	{
+		std::cout << boost::get<Identifer>(evaluated).name;
+	}
+	else
+	{
+		std::cout << "Unknown value";
+	}
 }
